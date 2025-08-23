@@ -20,6 +20,7 @@ const pool = new Pool({
  * @returns {Promise<object>} The user record from the 'users' table.
  */
 const findOrCreateUser = async (currentUser, provider, profile, token, tokenSecret) => {
+    console.log(`--- DB findOrCreateUser called for provider: ${provider} ---`);
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
@@ -83,17 +84,10 @@ const getIdentitiesByUserId = async (userId) => {
   return res.rows;
 };
 
-// Export all the functions
+// Single export object
 module.exports = {
-  query: (text, params) => pool.query(text, params),
-  findOrCreateUser,
-  getIdentitiesByUserId,
-};
-
-// At the bottom of db.js
-module.exports = {
-  pool,
-  query: (text, params) => pool.query(text, params),
-  findOrCreateUser,
-  getIdentitiesByUserId,
+    pool,
+    query: (text, params) => pool.query(text, params),
+    findOrCreateUser,
+    getIdentitiesByUserId,
 };

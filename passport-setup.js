@@ -34,6 +34,7 @@ passport.use(
     async (req, accessToken, refreshToken, profile, done) => {
       try {
         const user = await db.findOrCreateUser(req.user, 'google', profile, accessToken);
+        console.log('User found or created:', user); 
         return done(null, user);
       } catch (err) {
         return done(err, null);
@@ -54,6 +55,7 @@ passport.use(
     async (req, token, tokenSecret, profile, done) => {
       try {
         const user = await db.findOrCreateUser(req.user, 'twitter', profile, token, tokenSecret);
+        console.log('User found or created:', user); 
         return done(null, user);
       } catch (err) {
         return done(err, null);
@@ -72,9 +74,16 @@ passport.use(
       scope: ['r_liteprofile', 'r_emailaddress'],
       passReqToCallback: true,
     },
+
+    
     async (req, accessToken, refreshToken, profile, done) => {
+        // ADD THESE TWO LINES FOR DEBUGGING
+      console.log(process.env.LINKEDIN_CLIENT_ID)
+      console.log('--- LINKEDIN STRATEGY EXECUTING ---');
+      console.log('LinkedIn Profile Received:', profile.displayName);
       try {
         const user = await db.findOrCreateUser(req.user, 'linkedin', profile, accessToken);
+        console.log('User found or created:', user);
         return done(null, user);
       } catch (err) {
         return done(err, null);
