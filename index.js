@@ -67,6 +67,18 @@ app.get('/public/youtube/channel/:channelId', async (req, res) => {
   }
 });
 
+// Diagnostic endpoint to see why a given channelId might fail
+app.get('/public/youtube/channel/:channelId/debug', async (req, res) => {
+  try {
+    const { channelId } = req.params;
+    const stats = await youtubeApi.fetchChannelStats(channelId);
+    if(!stats) return res.status(404).json({ error: 'Channel not found (debug)', hint: 'Verify the ID starts with UC and the API key has YouTube Data API v3 enabled.' });
+    res.json({ ok: true, stats });
+  } catch (e) {
+    res.status(500).json({ error: 'Exception during fetch', details: e.response?.data || e.message });
+  }
+});
+
 // Get latest cached snapshot without hitting API (fast)
 app.get('/public/youtube/channel/:channelId/latest', async (req, res) => {
   try {

@@ -12,14 +12,23 @@ function ensureKey() {
 // Fetch stats for a known channel ID
 async function fetchChannelStats(channelId) {
   const apiKey = ensureKey();
-  const resp = await youtube.channels.list({
-    key: apiKey,
-    id: channelId,
-    part: ['snippet','statistics']
-  });
-  if(!resp.data.items || resp.data.items.length === 0) return null;
-  const ch = resp.data.items[0];
-  return mapChannel(ch);
+  const id = channelId.trim();
+  try {
+    const resp = await youtube.channels.list({
+      key: apiKey,
+      id,
+      part: 'snippet,statistics'
+    });
+    if(!resp.data.items || resp.data.items.length === 0) {
+      console.warn('[YouTube] channels.list returned 0 items for id', id);
+      return null;
+    }
+    const ch = resp.data.items[0];
+    return mapChannel(ch);
+  } catch(e) {
+    console.error('[YouTube] channels.list error for id', id, e.response?.data || e.message);
+    throw e;
+  }
 }
 
 // Search by query (name, handle, etc.) returning first matching channel summary
@@ -37,9 +46,9 @@ async function searchChannel(query) {
     const resp = await youtube.search.list({
       key: apiKey,
       q,
-      type: ['channel'],
+      type: 'channel',
       maxResults: 1,
-      part: ['snippet']
+      part: 'snippet'
     });
     if(resp.data.items && resp.data.items.length > 0) {
       const item = resp.data.items[0];
@@ -55,7 +64,7 @@ async function searchChannel(query) {
     const uResp = await youtube.channels.list({
       key: apiKey,
       forUsername: q,
-      part: ['snippet','statistics']
+      part: 'snippet,statistics'
     });
     if(uResp.data.items && uResp.data.items.length > 0) {
       return mapChannel(uResp.data.items[0]);
