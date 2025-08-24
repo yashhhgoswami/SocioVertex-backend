@@ -33,18 +33,48 @@ async function searchChannel(query) {
   }
   // Handle format @something
   let q = trimmed.replace(/^@/, '');
-  const resp = await youtube.search.list({
-    key: apiKey,
-    q,
-    type: ['channel'],
-    maxResults: 1,
-    part: ['snippet']
-  });
-  if(!resp.data.items || resp.data.items.length === 0) return null;
-  const item = resp.data.items[0];
-  const channelId = item.id?.channelId;
-  if(!channelId) return null;
-  return await fetchChannelStats(channelId); // get full stats
+  try {
+    const resp = await youtube.search.list({
+      key: apiKey,
+      q,
+      type: ['channel'],
+      maxResults: 1,
+      part: ['snippet']
+    });
+    if(resp.data.items && resp.data.items.length > 0) {
+      const item = resp.data.items[0];
+      const channelId = item.id?.channelId;
+      if(channelId) return await fetchChannelStats(channelId);
+    }
+  } catch (e) {
+    console.error('YouTube search.list error:', e.response?.data || e.message);
+  }
+
+  // Fallback: legacy forUsername (some older channels)
+  try {
+    const uResp = await youtube.channels.list({
+      key: apiKey,
+      forUsername: q,
+      part: ['snippet','statistics']
+    });
+    if(uResp.data.items && uResp.data.items.length > 0) {
+      return mapChannel(uResp.data.items[0]);
+    }
+  } catch (e) {
+    console.error('YouTube channels.list(forUsername) error:', e.response?.data || e.message);
+  }
+
+  // Fallback: if user pasted a full URL extract id or handle
+  const urlMatch = trimmed.match(/youtube\.com\/(?:channel\/|@)([A-Za-z0-9_-]+)/i);
+  if(urlMatch) {
+    const token = urlMatch[1];
+    if(token.startsWith('UC') && token.length > 20) {
+      return await fetchChannelStats(token);
+    }
+    // Treat as handle again with @token
+    return await searchChannel('@' + token); // one recursive attempt (will exit earlier next time)
+  }
+  return null;
 }
 
 function mapChannel(ch) {
@@ -91,9 +121,9 @@ async function listDistinctChannelIds() {
 async function getChannelSummary(channelId) {
   const latest = await latestSnapshot(channelId) || await (async ()=>{ const s = await fetchChannelStats(channelId); if(s) await saveSnapshot(s); return await latestSnapshot(channelId); })();
   if(!latest) return null;
-  const history = await historicalSnapshots(channelId, 60); // up to 60 recent snapshots
-  const last7 = history.filter((_,i)=> i < 7); // history ordered DESC
-  const last30 = history.filter((_,i)=> i < 30);
+  const historyDesc = await historicalSnapshots(channelId, 60); // ordered DESC
+  const last7 = historyDesc.filter((_,i)=> i < 7); // history ordered DESC
+  const last30 = historyDesc.filter((_,i)=> i < 30);
   const delta = (arr, field) => {
     if(arr.length < 2) return 0;
     const newest = arr[0][field];
@@ -106,7 +136,14 @@ async function getChannelSummary(channelId) {
   const earningsLow = Math.round((views30/1000) * 0.5); // simplistic CPM $0.5 - $4.0
   const earningsHigh = Math.round((views30/1000) * 4);
   const grade = computeGrade(latest.subscriber_count, latest.view_count);
-  return { latest, subs7, subs30, views30, estimatedMonthlyEarnings: { low: earningsLow, high: earningsHigh }, grade };
+  // Provide ascending history for easier charting on frontend
+  const history = [...historyDesc].reverse().map(s => ({
+    fetched_at: s.fetched_at,
+    subscriber_count: s.subscriber_count,
+    view_count: s.view_count,
+    video_count: s.video_count
+  }));
+  return { latest, subs7, subs30, views30, estimatedMonthlyEarnings: { low: earningsLow, high: earningsHigh }, grade, history };
 }
 
 function computeGrade(subs, views) {
