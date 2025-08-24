@@ -9,6 +9,9 @@ const passport = require('passport');
 const db = require('./db');
 const authRoutes = require('./auth-routes');
 const youtubeApi = require('./api/youtube');
+const path = require('path');
+const fs = require('fs');
+const multer = require('multer');
 require('./passport-setup'); 
 require('./scheduler');
 
@@ -17,7 +20,21 @@ const port = 3000;
 
 // Basic middleware
 app.use(cors({ origin: 'http://localhost:5173', credentials: true })); // adjust origin to frontend dev server
-app.use(express.json());
+app.use(express.json({ limit: '2mb' }));
+// Static serving for uploaded images
+const uploadDir = path.join(__dirname, 'uploads');
+if(!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir);
+app.use('/uploads', express.static(uploadDir));
+
+// Multer storage for avatar uploads
+const storage = multer.diskStorage({
+  destination: (req,file,cb)=> cb(null, uploadDir),
+  filename: (req,file,cb)=> {
+    const ext = path.extname(file.originalname||'');
+    cb(null, `avatar_${req.user?.id||'anon'}_${Date.now()}${ext}`);
+  }
+});
+const upload = multer({ storage, limits: { fileSize: 2 * 1024 * 1024 } }); // 2MB
 
 app.use(
   session({
@@ -41,10 +58,50 @@ function requireAuth(req, res, next) {
 }
 
 // Session info for frontend
-app.get('/me', (req, res) => {
+app.get('/me', async (req, res) => {
   if (!req.user) return res.json({ user: null });
-  const { id, display_name, avatar_url, created_at } = req.user;
-  res.json({ user: { id, display_name, avatar_url, created_at } });
+  const userRes = await db.query('SELECT id, display_name, avatar_url, created_at, bio, about, cover_image_url FROM users WHERE id=$1',[req.user.id]);
+  res.json({ user: userRes.rows[0] });
+});
+
+// Update profile basic fields
+app.patch('/api/profile', requireAuth, async (req,res)=>{
+  const { display_name, bio, about } = req.body;
+  try {
+    const userRes = await db.query(`UPDATE users SET 
+      display_name = COALESCE($1, display_name),
+      bio = COALESCE($2, bio),
+      about = COALESCE($3, about)
+      WHERE id=$4 RETURNING id, display_name, avatar_url, created_at, bio, about, cover_image_url`,
+      [display_name, bio, about, req.user.id]);
+    res.json({ user: userRes.rows[0] });
+  } catch(e){
+    console.error(e); res.status(500).json({ error: 'Update failed' });
+  }
+});
+
+// Upload avatar
+app.post('/api/profile/avatar', requireAuth, upload.single('avatar'), async (req,res)=>{
+  try {
+    if(!req.file) return res.status(400).json({ error:'No file' });
+    const rel = '/uploads/' + path.basename(req.file.path);
+    const userRes = await db.query('UPDATE users SET avatar_url=$1 WHERE id=$2 RETURNING id, display_name, avatar_url, created_at, bio, about, cover_image_url',[rel, req.user.id]);
+    res.json({ user: userRes.rows[0] });
+  } catch(e){
+    console.error(e); res.status(500).json({ error:'Avatar upload failed' });
+  }
+});
+
+// Update cover image via URL (simple)
+app.patch('/api/profile/cover', requireAuth, async (req,res)=>{
+  const { cover_image_url } = req.body;
+  if(!cover_image_url) return res.status(400).json({ error:'Missing cover_image_url'});
+  try {
+    const userRes = await db.query('UPDATE users SET cover_image_url=$1 WHERE id=$2 RETURNING id, display_name, avatar_url, created_at, bio, about, cover_image_url',[cover_image_url, req.user.id]);
+    res.json({ user: userRes.rows[0] });
+  } catch(e){
+    console.error(e); res.status(500).json({ error:'Cover update failed'});
+  }
 });
 
 app.get('/', (req, res) => {
@@ -64,18 +121,6 @@ app.get('/public/youtube/channel/:channelId', async (req, res) => {
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: 'Failed to fetch channel stats' });
-  }
-});
-
-// Diagnostic endpoint to see why a given channelId might fail
-app.get('/public/youtube/channel/:channelId/debug', async (req, res) => {
-  try {
-    const { channelId } = req.params;
-    const stats = await youtubeApi.fetchChannelStats(channelId);
-    if(!stats) return res.status(404).json({ error: 'Channel not found (debug)', hint: 'Verify the ID starts with UC and the API key has YouTube Data API v3 enabled.' });
-    res.json({ ok: true, stats });
-  } catch (e) {
-    res.status(500).json({ error: 'Exception during fetch', details: e.response?.data || e.message });
   }
 });
 
